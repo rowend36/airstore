@@ -1,0 +1,20 @@
+# All Firestore Query Rules are optional but recommended in order to gain maximum performance except where noted.
+- An orderBy clause also filters for existence of the given fields. The result set will not include documents that do not contain the given fields. IGNORED.
+- If you include a filter with a range comparison (<, <=, >, >=), your first ordering must be on the same field. RECOMMENDED.
+- A query with an inequality filter on a field implies ordering by that field and filters for existence of that field. RECOMMENDED/IGNORED.
+- Cloud Firestore provides support for logical OR queries through the or, in, and array-contains-any operators. These queries are limited to 30 disjunctions based on the query's disjunctive normal form. RECOMMENDED.
+- In a compound query, range (<, <=, >, >=) and not equals (!=, not-in) comparisons must all filter on the same field. RECOMMENDED.
+- You can use at most one array-contains clause per disjunction (or group). You can't combine array-contains with array-contains-any in the same disjunction. IGNORED (arrays always use table scans).
+- You can't combine not-in with in, array-contains-any, or or in the same query. RECOMMENDED/IGNORED (array always uses table scans).
+- Only a single not-in or !=` is allowed per query. RECOMMENDED.
+- not-in supports up to 10 comparison values. RECOMMENDED.
+- The sum of filters, sort orders, and parent document path (1 for a subcollection, 0 for a root collection) in a query cannot exceed 100. This is calculated based on the disjunctive normal form of the query. RECOMMENDED.
+- If you attempt a compound query with a range clause that doesn't map to an existing index, you receive an error. RECOMMENDED/IGNORED.
+
+# Most of the limits are no longer there but RECOMMENDED also. They are not stated here because there are kinda hard to break except this one.
+- Maximum size of an indexed field value	: 1500 bytes - We do not implement truncation of field values so transitioning to Firebase might break some behaviour here. IGNORED.
+
+# Firestore Rules
+- Airstore uses a dumb parser to convert firestore rules into efficient javascript functions.
+- Currently {document=**} is not supported
+- You can write any valid javascript in your airstore rules. However, the api is a subset of possible apis.
