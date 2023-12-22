@@ -1,21 +1,26 @@
-const session = require("express-session");
-const crypto = require("crypto");
+const { getFirebaseToken } = require("@hono/firebase-auth");
+const { verifyFirebaseAuth } = require("@hono/firebase-auth");
 
-exports.auth = session({
-    // This will log out users on server restart
-    secret: crypto.randomBytes(16).toString("hex"),
-    resave: false,
-    saveUninitialized: true,
-    cookie: {
-        secure: false,
-        maxAge: 24 * 60 * 60 * 1000 /* Wait a day */,
+let l;
+const auth = verifyFirebaseAuth({
+  projectId: "csmsuniben",
+  keyStore: {
+    get() {
+      return l;
     },
+    set(e) {
+      l = e;
+    },
+  },
 });
 
-exports.requireAuth = function (req, res, next) {
-    if (!req.session.user) {
-        res.status(401);
-        res.send("Unauthorized");
-        res.end();
-    } else return next();
+exports.auth = async (c, next) => {
+  try {
+    await auth(c, function () {
+      c.set("auth", getFirebaseToken(c));
+    });
+  } catch (e) {
+    console.log("Unauthenticated Request");
+  }
+  return await next();
 };

@@ -1,4 +1,19 @@
-const path = require('path');
-const Database  = require("better-sqlite3");
+const { getRuntimeKey } = require("hono/adapter");
+const path = require("path");
+/**
+ * @type {}
+ */
+let db;
 
-module.exports = new Database(path.resolve(__dirname, "../../db.sqlite"))
+exports.initDB = function (c, next) {
+  if (getRuntimeKey() === "workerd") {
+    db = c.env().DB;
+  } else if (!db) {
+    db = new (require("better-sqlite3").Database)(
+      // eslint-disable-next-line no-undef
+      path.resolve(__dirname, "../../db.sqlite")
+    );
+  }
+  return next();
+};
+exports.getDB = () => db;

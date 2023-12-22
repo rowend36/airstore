@@ -1,120 +1,116 @@
-// app.js
-
-const express = require("express");
+const { Hono } = require("hono");
+const { cors } = require("hono/cors");
+const { secureHeaders } = require("hono/secure-headers");
 const helmet = require("helmet");
-const compression = require("compression");
-const morgan = require("morgan");
-const path = require("path");
-const bodyParser = require("body-parser");
-const auth = require("./database/auth");
+const { auth } = require("./middleware/auth");
 const Collection = require("./database/collection");
-const app = express();
+const app = new Hono();
 const runTransaction = require("./database/transaction");
+const { logger } = require("hono/logger");
+const { initDB } = require("./database/db");
 
+app.use("*", logger());
+app.use(
+  "*",
+  cors({
+    // origin: [""]
+  })
+);
 // Helmet middleware for enhancing server security
 app.use(
-  helmet({
+  secureHeaders({
     contentSecurityPolicy: {
       directives: {
+        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
         "connect-src": ["'self'", "https://*", "http://*", "*"],
       },
     },
   })
 );
-
-// Compress all routes
-app.use(compression());
-
-// Logging middleware using Morgan
-app.use(morgan("dev"));
-
-// Serving static files
-app.use(express.static(path.join(path.dirname(__dirname), "public")));
-
-// Routes and APIs
-// app.use(auth);
-app.use(bodyParser.json());
-app.get("/collection/:collection", (req, res) =>
-  res.json(
-    Collection.of(req.params.collection).get(
-      req.query.query ? JSON.parse(req.query.query) : null
-    ) || {done: true}
-  )
-);
-app.get("/count/:collection", (req, res) =>
-  res.json(
-    Collection.of(req.params.collection).count(
-      req.query.query ? JSON.parse(req.query.query) : null
-    ) || {done: true}
-  )
-);
-
-app.get("/poll/:collection", (req, res) => {
-  console.log({p: req.params, q: req.query});
-  res.json(
-    Collection.of(req.params.collection).poll(
-      req.query.cursor,
-      req.query.query ? JSON.parse(req.query.query) : null
-    ) || {done: true}
+app.use(auth);
+app.use(initDB);
+app.get("/collection/:collection", (c) => {
+  return c.json(
+    Collection.of(c.req.param().collection).get(
+      c.req.query().query ? JSON.parse(c.req.query().query) : null
+    ) || { done: true }
   );
 });
 
-app.post("/delete/:collection/:id", (req, res) => {
-  res.json({
-    done: Collection.of(req.params.collection).delete({__id__: req.params.id}),
+app.get("/count/:collection", (c) =>
+  c.json(
+    Collection.of(c.req.param().collection).count(
+      c.req.query().query ? JSON.parse(c.req.query().query) : null
+    ) || { done: true }
+  )
+);
+
+app.get("/poll/:collection", (c) => {
+  console.log({ p: c.req.param(), q: c.req.query() });
+  c.json(
+    Collection.of(c.req.param().collection).poll(
+      c.req.query().cursor,
+      c.req.query().query ? JSON.parse(c.req.query().query) : null
+    ) || { done: true }
+  );
+});
+
+app.post("/delete/:collection/:id", (c) => {
+  c.json({
+    done: Collection.of(c.req.param().collection).delete({
+      __id__: c.req.param().id,
+    }),
   });
 });
-app.post("/set/:collection/:id", (req, res) => {
-  console.log(req.params, req.query);
-  Collection.of(req.params.collection).set(
+app.post("/set/:collection/:id", async (c) => {
+  console.log(c.req.param(), c.req.query());
+  Collection.of(c.req.param().collection).set(
     {
-      __id__: req.params.id,
-      ...req.body,
+      __id__: c.req.param().id,
+      ...(await c.req.json()),
     },
     {
       exists:
-        "create" in req.query
-          ? "update" in req.query
+        "create" in c.req.query()
+          ? "update" in c.req.query()
             ? undefined
             : false
           : true,
     }
   );
-  res.json({done: true});
+  c.json({ done: true });
 });
-app.post("/transaction/", async (req, res) => {
-  console.log(req.body);
-  await runTransaction(req.body);
-  res.json({done: true});
+app.post("/transaction/", async (c) => {
+  await runTransaction(await c.req.json());
+  c.json({ done: true });
 });
-app.get("/block", function (req, res) {
-  require("./database/db").transaction(() => {
-    for (var i = 0; i < 25000; i++) {
-      Collection.of("test").set({
-        __id__: "test_" + i,
-        hello: true,
-        "bad id/t": {
-          __isUpdateValue__: true,
-          type: "a+",
-          val: [5],
-        },
-        "add 1": {
-          __isUpdateValue__: true,
-          type: "i+",
-          val: 5,
-        },
-        "add '1'": {
-          __isUpdateValue__: true,
-          type: "a+",
-          val: [5],
-        },
-      });
-    }
-  })();
+app.get("/block", async function ({ res }) {
+  await require("./database/db")
+    .getDB()
+    .transaction(() => {
+      for (var i = 0; i < 25000; i++) {
+        Collection.of("test").set({
+          __id__: "test_" + i,
+          hello: true,
+          "bad id/t": {
+            __isUpdateValue__: true,
+            type: "a+",
+            val: [5],
+          },
+          "add 1": {
+            __isUpdateValue__: true,
+            type: "i+",
+            val: 5,
+          },
+          "add '1'": {
+            __isUpdateValue__: true,
+            type: "a+",
+            val: [5],
+          },
+        });
+      }
+    })();
   res.sendStatus(200);
 });
-// Start the server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+
+module.exports = app;
