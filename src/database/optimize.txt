@@ -18,3 +18,7 @@
 - Airstore uses a dumb parser to convert firestore rules into efficient javascript functions.
 - Currently {document=**} is not supported
 - You can write any valid javascript in your airstore rules. However, the api is a subset of possible apis.
+
+# Esoteric features 
+- Foreign Keys user->id Foreign Keys do not need to be specified more than once actually.
+- One issue with array of refs in firebase is that in sqlite, they are actually an indexed index. So, in the future, we can optimize the schema of Array<ref> to be a specific placeholder that is converted to a placeholder in the collection.

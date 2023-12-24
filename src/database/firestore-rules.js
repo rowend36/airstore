@@ -1,4 +1,4 @@
-module.exports = `
+export default `
 service cloud.firestore {
   match /databases/{hell} {
     allow read: if hell == pako('frisk');
@@ -9,4 +9,4 @@ service cloud.firestore {
     }
   }
 }
-`
+`;

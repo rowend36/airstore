@@ -1,53 +1,29 @@
-const { EventEmitter } = require("events");
-const createFilter = require("./filter");
-const createOrderBy = require("./order");
-const createLimit = require("./limit");
-const updateValue = require("./update_value");
-const { clean, flatten, validCollection, inbuiltProps } = require("./props");
-const { LRUCache } = require("lru-cache");
-const rules = require("./rules");
+import { EventEmitter } from "events";
+import createFilter from "./filter";
+import createOrderBy from "./order";
+import createLimit from "./limit";
+import updateValue from "./update_value";
+import { clean, flatten, validCollection, inbuiltProps } from "./props";
 
-const crypto = require("crypto");
-const { getDB } = require("./db");
+import rules from "./rules";
+
+import { subtle } from "crypto";
+import { dbExecute, dbAll, dbRaw, dbGet } from "./db";
 let algorithm = "aes-256-cbc";
-let key = crypto.randomBytes(32);
-let iv = crypto.randomBytes(16);
+let key = randomBytes(32);
+let iv = randomBytes(16);
+l;
 
 function encrypt(str) {
-  let cipher = crypto.createCipheriv(algorithm, key, iv);
+  let cipher = createCipheriv(algorithm, key, iv);
   return cipher.update(str, "utf8", "base64") + cipher.final("base64");
 }
 
 function decrypt(str) {
-  let decipher = crypto.createDecipheriv(algorithm, key, iv);
+  let decipher = createDecipheriv(algorithm, key, iv);
   return decipher.update(str, "base64", "utf8") + decipher.final("utf8");
 }
 
-const cache = new LRUCache({
-  sizeCalculation(value, key) {
-    return key.length;
-  },
-  maxSize: 5000,
-});
-function prepare(stmt) {
-  if (cache.has(stmt)) return cache.get(stmt);
-  else {
-    console.log(stmt);
-    console.log(
-      getDB()
-        .prepare("EXPLAIN QUERY PLAN " + stmt)
-        .all(
-          ...stmt
-            .split("?")
-            .slice(1)
-            .map(() => "")
-        )
-    );
-    const x = getDB().prepare(stmt);
-    cache.set(stmt, x);
-    return x;
-  }
-}
 /**
  * @type {Record<string, Collection}
  */
@@ -55,8 +31,8 @@ const _collections = {};
 /** TODO use lru cache */
 class Collection extends EventEmitter {
   name = "";
-  knownColumns = [];
   oplog = "";
+  dbInit = null;
   static of(name) {
     if (_collections[name]) return _collections[name];
     return (_collections[name] = new Collection(name));
@@ -67,34 +43,34 @@ class Collection extends EventEmitter {
     if (!validCollection(name)) throw new Error("Invalid collection " + name);
     this.name = name.replace(/\//g, "___");
     this.oplog = "___" + name + "_logs___";
-    prepare(
+    this.dbInit = dbExecute(
       `CREATE TABLE IF NOT EXISTS ${this.name} (
 __id__ TEXT PRIMARY KEY NOT NULL,
 __version__ INTEGER
-);`
-    ).run();
-    prepare(
-      `CREATE TABLE IF NOT EXISTS ${this.oplog} (
+);
+      CREATE TABLE IF NOT EXISTS ${this.oplog} (
 __index__ INTEGER PRIMARY KEY AUTOINCREMENT,
 __id__ TEXT KEY NOT NULL
 );`
-    ).run();
+    );
     this._listColumns();
-    this.dropEmptyColumns();
+    // Rather we schedule cleanups using a different table
+    // this.dropEmptyColumns();
+    // If someone tried to read a column that had been deleted, it would error.
+    // But only until the faulty worker was updated.
+    // To ensure this, when we drop columns, we should also clear cached queries.
   }
-  _listColumns() {
+
+  async _listColumns() {
     /** When doing read replication, we want to make sure changes to columns also trigger recreation of knownColumns.
             The advantage of better-sqlite3 synchronous API is obvious here.
         In a distributed database, knownColumns cannot be cached.
     */
-    return this.knownColumns.length
-      ? this.knownColumns
-      : (this.knownColumns = getDB()
-          .prepare(`select name from pragma_table_info(?)`)
-          .all(this.name)
-          .map((e) => clean(e.name)));
+    return await dbAll(`select name from pragma_table_info(?)`, [this.name], {
+      batch: true,
+    });
   }
-  _select(query, count) {
+  async _select(query, count) {
     console.log({ query });
     if (!query) query = {};
     query = {
@@ -111,37 +87,37 @@ __id__ TEXT KEY NOT NULL
         desc: ["asc"],
       },
     };
-    return getDB().transaction(() => {
-      const cols = this._listColumns();
-      const t = createFilter(cols, query.filter).compile();
-      const o = createOrderBy(
-        cols,
-        query.order || {
-          props: ["rowid"],
-          desc: ["asc"],
-        }
-      );
-      const v = createLimit(o, query.limit).compile();
-      const n = o.compile(); //Must happen after to get reversed flag set
-      t.sql += n.sql + v.sql;
-      t.args = [...t.args, ...n.args, ...v.args];
-      let compiled = `SELECT * FROM ${this.name} ${t.sql}`;
-      if (count) {
-        compiled = "SELECT count(*) as ___count__ FROM(" + compiled + ")";
+
+    const cols = this._listColumns();
+    const t = createFilter(cols, query.filter).compile();
+    const o = createOrderBy(
+      cols,
+      query.order || {
+        props: ["rowid"],
+        desc: ["asc"],
       }
-      const x = prepare(compiled);
-      const res = x.raw().all(t.args);
-      if (o.reversed) res.reverse();
-      return { rows: res, columns: x.columns().map((e) => e.name) };
-    })();
+    );
+    const v = createLimit(o, query.limit).compile();
+    const n = o.compile(); //Must happen after to get reversed flag set
+    t.sql += n.sql + v.sql;
+    t.args = [...t.args, ...n.args, ...v.args];
+    let compiled = `SELECT * FROM ${this.name} ${t.sql}`;
+    if (count) {
+      compiled = "SELECT count(*) as ___count__ FROM(" + compiled + ")";
+    }
+    const res = await dbRaw(compiled, t.args);
+    if (o.reversed) res.reverse();
+    // The implementation of createFilter is such that this will never return items that were not in the columns it specified.
+    // Except where such columns are undefined or null.
+    return { rows: res, columns: cols };
   }
-  get(query) {
-    return this._select(query, false);
+  async get(query) {
+    return await this._select(query, false);
   }
-  count(query) {
-    return this._select(query, true);
+  async count(query) {
+    return await this._select(query, true);
   }
-  set(data, conditions = {}) {
+  async set(data, conditions = {}) {
     if (!data.__id__) throw new Error("No id provided");
     const flat = flatten(data);
     this.createColumns(Object.keys(flat));
@@ -174,6 +150,7 @@ __id__ TEXT KEY NOT NULL
             };
       }
     });
+
     const create = conditions.exists !== true && {
       sql: `INSERT INTO ${this.name} (${keys
         .map(clean)
@@ -205,22 +182,21 @@ __id__ TEXT KEY NOT NULL
       : update
       ? [...update.args, flat.__id__]
       : [];
-    getDB().transaction(() => {
-      const res = prepare(query).run(...args);
-      if (!res.changes) {
-        if (
-          !(
-            create &&
-            this.remove(data) &&
-            prepare(create.sql).run(create.args).changes > 0
-          )
-        ) {
-          throw new Error("Write failed for " + data.__id__);
+    console.log(
+      await batch(() => {
+        if (typeof conditions.exists !== false) {
+          dbExecute(
+            "DELETE FROM test WHERE __id__ = ? AND __version__ IS NULL",
+            [data.__id__]
+          );
         }
-      }
-
-      prepare(`INSERT INTO ${this.oplog} (__id__) VALUES (?)`).run(flat.__id__);
-    })();
+        dbExecute(query, args);
+        dbExecute(
+          `INSERT INTO ${this.oplog} (__id__) SELECT ? WHERE (SELECT changes() = 0)`,
+          [data.__id__]
+        );
+      })
+    );
   }
   delete(data, conditions = {}) {
     try {
@@ -238,14 +214,14 @@ __id__ TEXT KEY NOT NULL
       }
     }
   }
-  remove(data) {
+  async remove(data) {
     if (!data.__id__) throw new Error("No id provided");
-    return (
-      prepare(`DELETE FROM ${this.name} WHERE __id__ == ?`).run(data.__id__)
-        .changes > 0
+    return await dbExecute(
+      `DELETE FROM ${this.name} WHERE __id__ == ?`,
+      [data.__id__].changes > 0
     );
   }
-  poll(cursor, query) {
+  async poll(cursor, query) {
     const BACKLOG_LIMIT = 25;
     let docs,
       newIds = null,
@@ -261,20 +237,15 @@ __id__ TEXT KEY NOT NULL
       }
       const { index, ids } = obj;
       oldIds = ids;
-      const isValid = prepare(
-        `SELECT TRUE  FROM ${this.oplog} WHERE __index__ == ?`
-      )
-        .pluck()
-        .get(index);
-      const changes =
-        isValid &&
-        prepare(
-          `SELECT __id__, MAX(__index__) AS _index FROM ${
-            this.oplog
-          } WHERE __index__ > ? GROUP BY __id__
+      const changes = await dbAll(
+        `SELECT __id__, MAX(__index__) AS _index FROM ${
+          this.oplog
+        } WHERE __index__ >= ? GROUP BY __id__
                 ORDER BY _index ASC
-                LIMIT ${oldIds ? BACKLOG_LIMIT : 1}` //Rather than iterate through changes, just check if anything changed
-        ).all(index);
+                LIMIT ${oldIds ? BACKLOG_LIMIT : 1}`, //Rather than iterate through changes, just check if anything changed
+        [index]
+      );
+      const isValid = changes.pop()._index === index;
       if (!isValid || changes.length !== 0) {
         newIds =
           changes.length < BACKLOG_LIMIT &&
@@ -283,13 +254,13 @@ __id__ TEXT KEY NOT NULL
         // Oplog has been recycled,
 
         newCursor = changes[changes.length - 1];
-        docs = this.get(query);
+        docs = await this.get(query);
       }
     } else {
       docs = this.get(query);
-      newCursor = prepare(
+      newCursor = await dbGet(
         `SELECT MAX(__index__) AS _index FROM ${this.oplog}`
-      ).get();
+      );
     }
     // TODO: this is not actually efficient in that we send the ids twice
     const ID = docs && docs.columns.indexOf("__id__");
@@ -386,4 +357,4 @@ __id__ TEXT KEY NOT NULL
   }
 }
 
-module.exports = Collection;
+export default Collection;

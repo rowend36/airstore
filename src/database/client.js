@@ -1,5 +1,5 @@
 import * as props from "./props";
-import {v4 as uuidv4} from "uuid";
+import { v4 as uuidv4 } from "uuid";
 
 export function getAirstore(root, app) {
   return {
@@ -136,7 +136,7 @@ export function query(ref, ...specs) {
   for (let spec of specs) {
     if (spec.order) {
       if (!t.order) {
-        t.order = {props: [...spec.order.props], desc: [...spec.order.desc]};
+        t.order = { props: [...spec.order.props], desc: [...spec.order.desc] };
       } else {
         t.order.props.push(...spec.order.props);
         t.order.desc.push(...spec.order.desc);
@@ -167,7 +167,7 @@ export function query(ref, ...specs) {
     if (spec.filter) {
       if (t.filter && !t.filter.next) t.filter.next = spec.filter;
       else if (!t.filter || !spec.next) {
-        t.filter = {...spec.filter, next: t.filter};
+        t.filter = { ...spec.filter, next: t.filter };
       } else {
         t.filter = {
           val: t.filter,
@@ -180,7 +180,7 @@ export function query(ref, ...specs) {
     query: t,
     converter: undefined,
     withConverter(converter) {
-      return {...this, converter};
+      return { ...this, converter };
     },
     ref,
   };
@@ -195,12 +195,7 @@ class DocumentSnapshot {
   data(options) {
     if (!options && this._conv) return this._conv.fromFirestore(this, {});
     if (!this._data) return;
-    const s = {};
-    for (let i = 0; i < this.columns.length; i++) {
-      if (!props.inbuiltProps[this.columns[i]])
-        s[this.columns[i]] = this._data[i];
-    }
-    return props.unflatten(s);
+    return props.unflatten(this._data, this.columns);
   }
   exists() {
     return !!this._data;
@@ -395,7 +390,7 @@ class Batch {
   /**
    * @type {Record<"reads"|"writes", any[][]>}
    */
-  spec = {writes: [], reads: []};
+  spec = { writes: [], reads: [] };
   set(ref, data) {
     this.spec.writes.push([ref.parent.path, ref.id, data, "create&update"]);
   }

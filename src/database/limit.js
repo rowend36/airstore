@@ -17,10 +17,10 @@ class Limit {
   }
 }
 
-module.exports = function createLimit(order, spec) {
+export default function createLimit(order, spec) {
   if (spec && spec < 0 !== order.reversed) {
     order.reverse();
     console.log("Reversing order");
   }
   return new Limit(spec && Math.abs(spec));
-};
+}

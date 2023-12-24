@@ -1,4 +1,4 @@
-const {clean, inbuiltProps} = require("./props");
+import { clean, inbuiltProps } from "./props";
 
 class Filter {
   prop = "";
@@ -121,11 +121,15 @@ class Filter {
 function createFilter(cols, spec) {
   return new Filter(
     cols.indexOf(clean(spec.prop)) < 0 ? "'NULL'" : clean(spec.prop),
-    spec.op == "==" ? "IS" : spec.op == "!=" ? "IS NOT" : spec.op,
+    cols.indexOf(clean(spec.prop)) < 0 || spec.op == "=="
+      ? "IS"
+      : spec.op == "!="
+      ? "IS NOT"
+      : spec.op,
     !spec.op ? createFilter(cols, spec.val) : spec.val,
     spec.next ? createFilter(cols, spec.next) : null,
     spec.next && (spec.nextType || "AND")
   );
 }
 
-module.exports = createFilter;
+export default createFilter;

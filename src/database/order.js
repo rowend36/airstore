@@ -1,4 +1,4 @@
-const {clean, inbuiltProps} = require("./props");
+import { clean, inbuiltProps } from "./props";
 
 class OrderBy {
   props = [];
@@ -28,10 +28,12 @@ class OrderBy {
   }
 }
 
-module.exports = function createOrderBy(cols, spec) {
-  const valid = spec.props.map((e) => inbuiltProps[e] || cols.indexOf(clean(e)) > -1);
+export default function createOrderBy(cols, spec) {
+  const valid = spec.props.map(
+    (e) => inbuiltProps[e] || cols.indexOf(clean(e)) > -1
+  );
   return new OrderBy(
     spec.props.filter((e, i) => valid[i]),
     spec.desc.filter((e, i) => valid[i])
   );
-};
+}
