@@ -1,8 +1,8 @@
-const { getFirebaseToken } = require("@hono/firebase-auth");
-const { verifyFirebaseAuth } = require("@hono/firebase-auth");
+import { getFirebaseToken } from "@hono/firebase-auth";
+import { verifyFirebaseAuth } from "@hono/firebase-auth";
 
 let l;
-const auth = verifyFirebaseAuth({
+const firebaseAuth = verifyFirebaseAuth({
   projectId: "csmsuniben",
   keyStore: {
     get() {
@@ -14,9 +14,9 @@ const auth = verifyFirebaseAuth({
   },
 });
 
-exports.auth = async (c, next) => {
+export const auth = async (c, next) => {
   try {
-    await auth(c, function () {
+    await firebaseAuth(c, function () {
       c.set("auth", getFirebaseToken(c));
     });
   } catch (e) {

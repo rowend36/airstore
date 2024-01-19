@@ -1,3 +1,5 @@
+import rulesFile from "./firestore-rules.js";
+
 const globals = {
   response: true,
   request: true,
@@ -269,4 +271,4 @@ function createValidator(str) {
   return new Rules(matchers, scopes[0]);
 }
 
-export default createValidator(require("./firestore-rules").default);
+export default createValidator(rulesFile);

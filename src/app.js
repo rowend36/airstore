@@ -1,13 +1,12 @@
-const { Hono } = require("hono");
-const { cors } = require("hono/cors");
-const { secureHeaders } = require("hono/secure-headers");
-const helmet = require("helmet");
-const { auth } = require("./middleware/auth");
-const Collection = require("./database/collection").default;
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { secureHeaders } from "hono/secure-headers";
+import { contentSecurityPolicy as _contentSecurityPolicy } from "helmet";
+import { auth } from "./middleware/auth.js";
+import Collection from "./database/collection.js";
 const app = new Hono();
-const runTransaction = require("./database/transaction");
-const { logger } = require("hono/logger");
-const { initDB } = require("./database/db");
+import runTransaction from "./database/transaction.js";
+import { logger } from "hono/logger";
 
 app.use("*", logger());
 app.use(
@@ -21,14 +20,13 @@ app.use(
   secureHeaders({
     contentSecurityPolicy: {
       directives: {
-        ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+        ..._contentSecurityPolicy.getDefaultDirectives(),
         "connect-src": ["'self'", "https://*", "http://*", "*"],
       },
     },
   })
 );
 app.use(auth);
-app.use(initDB);
 app.get("/collection/:collection", (c) => {
   return c.json(
     Collection.of(c.req.param().collection).get(
@@ -113,4 +111,4 @@ app.get("/block", async function ({ res }) {
   res.sendStatus(200);
 });
 
-module.exports = app;
+export default app;

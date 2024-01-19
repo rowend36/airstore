@@ -1,4 +1,4 @@
-import { clean, inbuiltProps } from "./props";
+import { clean, inbuiltProps } from "./props.js";
 
 class OrderBy {
   props = [];

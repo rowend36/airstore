@@ -1,5 +1,5 @@
 import { createClient } from "@libsql/client";
-import { unflatten } from "./props";
+import { unflatten } from "./props.js";
 
 /**
  * @type {"libsql"|"d1"|"better-sqlite3"}
@@ -14,7 +14,7 @@ const tursoDB =
       })
     : null;
 
-const { LRUCache } = require("lru-cache");
+import { LRUCache } from "lru-cache";
 const cache = new LRUCache({
   sizeCalculation(value, key) {
     return key.length;
@@ -64,4 +64,17 @@ export async function dbAll(sql, args) {
 
 export async function dbRaw(sql, args) {
   return await tursoDB.execute({ sql, args });
+}
+
+/**
+ *
+ * @param {(txn: import("@libsql/client").Transaction)=>void} cb
+ */
+export async function dbTransaction(cb) {
+  const txn = await tursoDB.transaction("write");
+  try {
+    await cb(txn);
+  } finally {
+    txn.close();
+  }
 }

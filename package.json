@@ -2,10 +2,11 @@
   "name": "airstore",
   "version": "1.0.0",
   "description": "",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "esbuild src/database/client.js --bundle --format=esm --outfile=public/airstore.mjs; esbuild src/database/client.js --outfile=public/airstore.min.js --bundle --minify --format=cjs;esbuild src/database/client.js --outfile=public/airstore.cjs --bundle --format=cjs",
+    "build": "esbuild src/database/client.js --bundle --minify --outfile=public/airstore.js --format=esm",
     "node:dev": "nodemon src/index.js",
     "dev": "wrangler dev",
     "deploy": "wrangler publish"
@@ -18,7 +19,7 @@
     "@hono/swagger-ui": "^0.2.0",
     "@libsql/client": "^0.4.0-pre.5",
     "better-sqlite3": "^9.2.2",
-    "drizzle-orm": "^0.29.1",
+    "events": "^3.3.0",
     "helmet": "^7.1.0",
     "hono": "^3.11.8",
     "lru-cache": "^10.1.0",

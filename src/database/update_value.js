@@ -44,7 +44,7 @@ function increment(prop, arg) {
   };
 }
 
-module.exports = function updateValue(key, val) {
+export default function updateValue(key, val) {
   switch (val.type) {
     case "a+":
       return arrayUnion(key, val.val);
@@ -65,4 +65,4 @@ module.exports = function updateValue(key, val) {
     default:
       throw new Error("Unknown update operation " + val.type);
   }
-};
+}

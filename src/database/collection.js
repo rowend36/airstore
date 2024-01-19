@@ -1,27 +1,52 @@
 import { EventEmitter } from "events";
-import createFilter from "./filter";
-import createOrderBy from "./order";
-import createLimit from "./limit";
-import updateValue from "./update_value";
-import { clean, flatten, validCollection, inbuiltProps } from "./props";
+import createFilter from "./filter.js";
+import createOrderBy from "./order.js";
+import createLimit from "./limit.js";
+import updateValue from "./update_value.js";
+import { clean, flatten, validCollection, inbuiltProps } from "./props.js";
 
-import rules from "./rules";
+import rules from "./rules.js";
 
-import { subtle } from "crypto";
-import { dbExecute, dbAll, dbRaw, dbGet } from "./db";
-let algorithm = "aes-256-cbc";
-let key = randomBytes(32);
-let iv = randomBytes(16);
-l;
+import {
+  dbExecute,
+  dbAll,
+  dbRaw,
+  dbGet,
+  dbBatch,
+  dbTransaction,
+} from "./db.js";
 
-function encrypt(str) {
-  let cipher = createCipheriv(algorithm, key, iv);
-  return cipher.update(str, "utf8", "base64") + cipher.final("base64");
+const subtleCrypto = globalThis.crypto.subtle;
+let key = await subtleCrypto.generateKey(
+  {
+    name: "AES-GCM",
+    length: 256,
+  },
+  true,
+  ["encrypt", "decrypt"]
+);
+let iv = globalThis.crypto.getRandomValues(new Uint16Array(32));
+
+async function encrypt(str) {
+  await subtleCrypto.encrypt(
+    {
+      name: "AES-CBC",
+      iv,
+    },
+    key,
+    str
+  );
 }
 
-function decrypt(str) {
-  let decipher = createDecipheriv(algorithm, key, iv);
-  return decipher.update(str, "base64", "utf8") + decipher.final("utf8");
+async function decrypt(str) {
+  await subtleCrypto.decrypt(
+    {
+      iv,
+      name: "AES-CBC",
+    },
+    key,
+    str
+  );
 }
 
 /**
@@ -66,7 +91,7 @@ __id__ TEXT KEY NOT NULL
             The advantage of better-sqlite3 synchronous API is obvious here.
         In a distributed database, knownColumns cannot be cached.
     */
-    return await dbAll(`select name from pragma_table_info(?)`, [this.name], {
+    return await dbAll(`SELECT name FROM pragma_table_info(?)`, [this.name], {
       batch: true,
     });
   }
@@ -88,7 +113,7 @@ __id__ TEXT KEY NOT NULL
       },
     };
 
-    const cols = this._listColumns();
+    const cols = await this._listColumns();
     const t = createFilter(cols, query.filter).compile();
     const o = createOrderBy(
       cols,
@@ -111,116 +136,14 @@ __id__ TEXT KEY NOT NULL
     // Except where such columns are undefined or null.
     return { rows: res, columns: cols };
   }
+
   async get(query) {
     return await this._select(query, false);
   }
   async count(query) {
     return await this._select(query, true);
   }
-  async set(data, conditions = {}) {
-    if (!data.__id__) throw new Error("No id provided");
-    const flat = flatten(data);
-    this.createColumns(Object.keys(flat));
-    const keys = Object.keys(flat);
-    /**
-         * @type {{
-             sql: string,
-             sqlCreate?: string,
-             args: any[],
-             argsCreate?: any[]
-         }[]}
-         */
-    const placeholders = keys.map(function (key) {
-      let e = flat[key];
-      if (e && typeof e === "object" && e.__isUpdateValue__) {
-        return updateValue(clean(key), e);
-      } else {
-        return inbuiltProps[key]
-          ? {
-              sql:
-                key === "__version__" && data.__version__ != null
-                  ? `max(?, ${key} + 1)`
-                  : "?",
-              sqlCreate: "?",
-              args: [e],
-            }
-          : {
-              sql: "json(?)",
-              args: [JSON.stringify(e)],
-            };
-      }
-    });
 
-    const create = conditions.exists !== true && {
-      sql: `INSERT INTO ${this.name} (${keys
-        .map(clean)
-        .join(", ")}) VALUES (${keys.map(
-        (e, i) => placeholders[i].sqlCreate || placeholders[i].sql
-      )})`,
-      args: placeholders.map((e) => e.argsCreate || e.args).flat(),
-    };
-
-    // TODO: Here we update id twice unnecessarily
-    const update = conditions.exists !== false && {
-      sql: `UPDATE SET ${keys.map(
-        (e, i) => `${clean(e)}   = ${placeholders[i].sql}`
-      )} WHERE __version__ IS NOT NULL`,
-      args: placeholders.map((e) => e.args).flat(),
-    };
-
-    const query = create
-      ? update
-        ? create.sql + " ON CONFLICT DO " + update.sql
-        : create.sql
-      : update
-      ? "UPDATE " + this.name + update.sql.slice(6) + " AND __id__ = ?"
-      : "";
-    const args = create
-      ? update
-        ? [...create.args, ...update.args]
-        : create.args
-      : update
-      ? [...update.args, flat.__id__]
-      : [];
-    console.log(
-      await batch(() => {
-        if (typeof conditions.exists !== false) {
-          dbExecute(
-            "DELETE FROM test WHERE __id__ = ? AND __version__ IS NULL",
-            [data.__id__]
-          );
-        }
-        dbExecute(query, args);
-        dbExecute(
-          `INSERT INTO ${this.oplog} (__id__) SELECT ? WHERE (SELECT changes() = 0)`,
-          [data.__id__]
-        );
-      })
-    );
-  }
-  delete(data, conditions = {}) {
-    try {
-      this.set(
-        {
-          __id__: data.__id__,
-          __version__: null,
-        },
-        { exists: true }
-      );
-      return true;
-    } catch (e) {
-      if (e.message === "Failed to run set" && !conditions.exists) {
-        return false;
-      }
-    }
-  }
-  async remove(data) {
-    if (!data.__id__) throw new Error("No id provided");
-    return await dbExecute(
-      `DELETE FROM ${this.name} WHERE __id__ == ?`,
-      [data.__id__].changes > 0
-    );
-  }
   async poll(cursor, query) {
     const BACKLOG_LIMIT = 25;
     let docs,
@@ -292,7 +215,119 @@ __id__ TEXT KEY NOT NULL
       cursor: cursorStr,
     };
   }
-  createColumns(cols) {
+
+  // WRITES
+  async _prepareSet(data, conditions = {}) {
+    if (!data.__id__) throw new Error("No id provided");
+    const flat = flatten(data);
+    const keys = Object.keys(flat);
+
+    /**
+     * @type {{
+     *     sql: string,
+     *     sqlCreate?: string,
+     *     args: any[],
+     *     argsCreate?: any[]
+     * }[]}
+     */
+    const placeholders = keys.map(function (key) {
+      let e = flat[key];
+      if (e && typeof e === "object" && e.__isUpdateValue__) {
+        return updateValue(clean(key), e);
+      } else {
+        return inbuiltProps[key]
+          ? {
+              sql:
+                key === "__version__" && data.__version__ != null
+                  ? `max(?, ${key} + 1)`
+                  : "?",
+              sqlCreate: "?",
+              args: [e],
+            }
+          : {
+              sql: "json(?)",
+              args: [JSON.stringify(e)],
+            };
+      }
+    });
+
+    // CREATE QUERY TO INSERT INTO DATABASE
+    const create = conditions.exists !== true && {
+      sql: `INSERT INTO ${this.name} (${keys
+        .map(clean)
+        .join(", ")}) VALUES (${keys.map(
+        (e, i) => placeholders[i].sqlCreate || placeholders[i].sql
+      )})`,
+      args: placeholders.map((e) => e.argsCreate || e.args).flat(),
+    };
+
+    // CREATE QUERY TO UPDATE INTO DATABASE
+    const update = conditions.exists !== false && {
+      sql: `UPDATE SET ${keys.map(
+        (e, i) => `${clean(e)}   = ${placeholders[i].sql}`
+      )} WHERE __version__ IS NOT NULL`,
+      args: placeholders.map((e) => e.args).flat(),
+    };
+
+    // JOIN QUERIES BASED ON CONDITIONS
+    const query = create
+      ? update
+        ? create.sql + " ON CONFLICT DO " + update.sql
+        : create.sql
+      : update
+      ? "UPDATE " + this.name + update.sql.slice(6) + " AND __id__ = ?"
+      : "";
+    const args = create
+      ? update
+        ? [...create.args, ...update.args]
+        : create.args
+      : update
+      ? [...update.args, flat.__id__]
+      : [];
+    return [
+      ...this._prepareColumns(Object.keys(flat)),
+      typeof conditions.exists !== false && {
+        sql: "DELETE FROM test WHERE __id__ = ? AND __version__ IS NULL",
+        args: [data.__id__],
+      },
+      { sql: query, args },
+      {
+        sql: `INSERT INTO ${this.oplog} (__id__) SELECT ? WHERE (SELECT changes() = 0)`,
+        args: [data.__id__],
+      },
+    ];
+  }
+  async set(data, conditions) {
+    return await dbBatch(this._prepareSet(data, conditions));
+  }
+  async delete(data, conditions = {}) {
+    try {
+      await this.set(
+        {
+          __id__: data.__id__,
+          __version__: null,
+        },
+        { exists: true }
+      );
+      return true;
+    } catch (e) {
+      if (e.message === "Failed to run set" && !conditions.exists) {
+        return false;
+      }
+    }
+  }
+  async remove(data) {
+    if (!data.__id__) throw new Error("No id provided");
+    return (
+      (
+        await dbExecute(`DELETE FROM ${this.name} WHERE __id__ == ?`, [
+          data.__id__,
+        ])
+      ).rowsAffected > 0
+    );
+  }
+  _prepareColumns(cols) {
+    const sql = [];
     cols = cols.filter((col) => {
       return this.knownColumns.indexOf(clean(col)) < 0;
     });
@@ -302,23 +337,15 @@ __id__ TEXT KEY NOT NULL
         if (prefix[0] === '"') {
           prefix = JSON.parse(prefix);
         }
-        getDB().transaction(() => {
-          getDB()
-            .prepare(
-              `ALTER TABLE ${this.name} ADD COLUMN ${clean(col)} JSON
+        sql.push(
+          `ALTER TABLE ${this.name} ADD COLUMN ${clean(col)} JSON
             `
-            )
-            .run();
-
-          // Used for binary queries
-          getDB()
-            .prepare(
-              `CREATE INDEX IF NOT EXISTS ${clean(prefix + "idx___")} ON ${
-                this.name
-              } (json_extract(${clean(col)}, '$'))`
-            )
-            .run();
-        })();
+        );
+        sql.push(
+          `CREATE INDEX IF NOT EXISTS ${clean(prefix + "idx___")} ON ${
+            this.name
+          } (json_extract(${clean(col)}, '$'))`
+        );
         this.knownColumns.push(clean(col));
       } catch (e) {
         if (e.code === "SQLITE_ERROR" && /duplicate column/.test(e.message)) {
@@ -328,29 +355,22 @@ __id__ TEXT KEY NOT NULL
         throw e;
       }
     }
+    return { sql, args: [] };
   }
-  dropEmptyColumns() {
+  async dropEmptyColumns() {
     let update = false;
-    for (let col of this.knownColumns) {
-      if (!inbuiltProps[col])
-        getDB()
-          .transaction(() => {
-            if (
-              getDB()
-                .prepare(
-                  `SELECT 1 from ${this.name} where ${col} IS NOT NULL LIMIT 1`
-                )
-                .raw()
-                .all().length === 0
-            ) {
-              update = true;
-              getDB()
-                .prepare(`ALTER TABLE ${this.name} DROP COLUMN ${col}`)
-                .run();
-            }
-          })
-          .immediate();
-    }
+    await dbTransaction(async (txn) => {
+      for (let col of this.knownColumns) {
+        if (!inbuiltProps[col]) {
+          const res = await txn.execute(
+            `SELECT 1 from ${this.name} where ${col} IS NOT NULL LIMIT 1`
+          );
+          if (res.rows.length > 0) {
+            await txn.execute(`ALTER TABLE ${this.name} DROP COLUMN ${col}`);
+          }
+        }
+      }
+    });
     if (update) {
       this.knownColumns = [];
     }

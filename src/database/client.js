@@ -1,4 +1,4 @@
-import * as props from "./props";
+import * as props from "./props.js";
 import { v4 as uuidv4 } from "uuid";
 
 export function getAirstore(root, app) {
