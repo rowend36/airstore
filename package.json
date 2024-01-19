@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "esbuild src/database/client.js --bundle --minify --outfile=public/airstore.js --format=esm",
+    "build": "esbuild src/database/client.js --bundle --outfile=public/airstore.js --format=esm",
     "node:dev": "nodemon src/index.js",
     "dev": "wrangler dev",
     "deploy": "wrangler publish"

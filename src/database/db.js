@@ -48,21 +48,25 @@ export async function dbBatch(stmts) {
   );
 }
 
-export async function dbExecute(sql, args) {
+export async function dbExecute(sql, args = []) {
+  console.log({ sql, args });
   return await tursoDB.execute({ sql, args });
 }
 
-export async function dbGet(sql, args) {
+export async function dbGet(sql, args = []) {
+  console.log({ sql, args });
   const res = await tursoDB.execute({ sql, args });
   return res[0] && unflatten(res.rows[0], res.columns);
 }
 
-export async function dbAll(sql, args) {
+export async function dbAll(sql, args = []) {
+  console.log({ sql, args });
   const res = await tursoDB.execute({ sql, args });
   return res.rows.map((e) => unflatten(e, res.columns));
 }
 
-export async function dbRaw(sql, args) {
+export async function dbRaw(sql, args = []) {
+  console.log({ sql, args });
   return await tursoDB.execute({ sql, args });
 }
 

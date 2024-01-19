@@ -4,6 +4,7 @@ import { verifyFirebaseAuth } from "@hono/firebase-auth";
 let l;
 const firebaseAuth = verifyFirebaseAuth({
   projectId: "csmsuniben",
+  firebaseEmulatorHost: "",
   keyStore: {
     get() {
       return l;
